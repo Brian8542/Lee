@@ -26,3 +26,28 @@ python link_hub_wiki.py "보관함경로" --apply   # 2단계: 실제 적용
 - 결과
   - `07_QONE_Wiki/점검_허브위키_애매한짝_<시각>.md`에 애매한 짝을 남깁니다.
   - `log.md`(`07_QONE_Wiki/log.md`, 없으면 보관함 맨 위 `log.md`)에 링크 수를 기록합니다.
+
+---
+
+# 인물 관련 파일 모으기 스크립트
+
+`collect_person_files.py`: 폴더 안에서 특정 인물(기본: 한정훈) 관련 파일을 찾아 한 폴더로 모읍니다.
+
+## 실행 (맥 터미널, 추가 설치 필요 없음)
+
+```
+python3 collect_person_files.py                  # 1단계: 미리보기 (파일을 바꾸지 않음)
+python3 collect_person_files.py --apply          # 2단계: 복사해서 모으기
+python3 collect_person_files.py --apply --move   # 복사 대신 이동
+```
+
+- 기본 대상 폴더: `~/Desktop/40_관계사/제주청기와장어`
+- 모으는 곳: 대상 폴더 안 `한정훈_대표이사_관련` 폴더
+- 다른 폴더나 단어: `python3 collect_person_files.py "폴더경로" -k 단어1 -k 단어2`
+
+## 규칙
+
+- 파일명이나 상위 폴더명에 키워드가 있으면 찾습니다(띄어쓰기 무시).
+- 맥 Spotlight로 파일 내용(PDF, 워드, 엑셀 등)에 키워드가 있는 것도 찾습니다. 끄려면 `--no-content`.
+- 같은 이름이 있으면 덮어쓰지 않고 `(2)`를 붙입니다.
+- 모은 폴더에 원래 위치를 적은 `_목록_<시각>.csv`를 남깁니다.
