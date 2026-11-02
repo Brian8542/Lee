@@ -63,14 +63,27 @@ cmd_check() {
   fi
 }
 
-# 이미 등록된 이 프린터의 이름을 찾습니다. (macOS 언어와 관계없이 동작하도록 영어 출력 사용)
+# macOS는 lpstat 결과를 시스템 언어로 번역하므로, 번역되지 않는 값만 사용합니다.
+#   lpstat -e        : 프린터 이름 목록
+#   lpoptions -p 이름 : device-uri=..., printer-state=... 같은 영문 키=값
+queue_attr() {
+  lpoptions -p "$1" 2>/dev/null | tr ' ' '\n' | sed -n "s/^$2=//p" | head -n 1
+}
+
+# 등록된 프린터를 "이름 주소" 형식으로 한 줄씩 출력합니다.
+list_queues() {
+  lpstat -e 2>/dev/null | while read -r name; do
+    printf '%s %s\n' "$name" "$(queue_attr "$name" device-uri)"
+  done
+}
+
+# 이미 등록된 이 프린터(삼성 C51x)의 이름을 찾습니다.
 find_queue() {
-  LANG=C LC_ALL=C lpstat -v 2>/dev/null | sed -nE 's/^device for ([^:]+): (.*)$/\1 \2/p' |
-    while read -r name dev; do
-      case "$dev" in
-        *SEC*|*C51*|*[Ss]amsung*) printf '%s\n' "$name"; break ;;
-      esac
-    done
+  list_queues | while read -r name dev; do
+    case "$dev" in
+      *SEC*|*C51*|*[Ss]amsung*) printf '%s\n' "$name"; break ;;
+    esac
+  done
 }
 
 queue_driver() {
@@ -81,8 +94,7 @@ cmd_setup() {
   q="$(find_queue)"
 
   # 예전 IP(192.168.0.201)로 등록된 항목은 IP가 바뀌어 더 이상 쓸 수 없으므로 지웁니다.
-  LANG=C LC_ALL=C lpstat -v 2>/dev/null | sed -nE 's/^device for ([^:]+): (.*)$/\1 \2/p' |
-    while read -r name dev; do
+  list_queues | while read -r name dev; do
       case "$dev" in
         *"$DEFAULT_IP"*)
           say "예전 IP 항목 제거: $name"
@@ -139,7 +151,9 @@ cmd_test() {
 
 # 오류로 멈춘(disabled) 프린터를 다시 켭니다. 인쇄 작업은 지우지 않습니다.
 cmd_heal() {
-  LANG=C LC_ALL=C lpstat -p 2>/dev/null | awk '/^printer .* disabled/ {print $2}' | while read -r p; do
+  # printer-state 값 5 = 멈춤(stopped)
+  lpstat -e 2>/dev/null | while read -r p; do
+    [ "$(queue_attr "$p" printer-state)" = "5" ] || continue
     cupsenable "$p" 2>/dev/null && logger "printer-watchdog: re-enabled $p"
   done
 }
