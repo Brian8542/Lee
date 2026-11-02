@@ -63,64 +63,78 @@ cmd_check() {
   fi
 }
 
+# 이미 등록된 이 프린터의 이름을 찾습니다. (macOS 언어와 관계없이 동작하도록 영어 출력 사용)
+find_queue() {
+  LANG=C LC_ALL=C lpstat -v 2>/dev/null | sed -nE 's/^device for ([^:]+): (.*)$/\1 \2/p' |
+    while read -r name dev; do
+      case "$dev" in
+        *SEC*|*C51*|*[Ss]amsung*) printf '%s\n' "$name"; break ;;
+      esac
+    done
+}
+
+queue_driver() {
+  grep -h '^\*NickName' "/etc/cups/ppd/$1.ppd" 2>/dev/null | cut -d'"' -f2
+}
+
 cmd_setup() {
-  ip="$1"
-  uri=""
-  if [ -n "$ip" ]; then
-    uri="ipp://$ip/ipp/print"
-  else
-    say "네트워크에서 프린터를 찾는 중입니다 (최대 5초)..."
-    uri="$(find_airprint_uri)"
-    [ -z "$uri" ] && uri="ipp://$DEFAULT_IP/ipp/print"
-  fi
-  say "사용할 주소: $uri"
+  q="$(find_queue)"
 
-  if ! ipp_ok "$uri"; then
-    say ""
-    say "프린터가 응답하지 않습니다. 다음을 확인해 주세요."
-    say "  1) 프린터 전원과 Wi-Fi 연결"
-    say "  2) Mac과 프린터가 같은 Wi-Fi에 있는지"
-    say "  3) 프린터의 현재 IP (정보 버튼을 길게 눌러 설정 보고서 출력)"
-    say "확인한 IP로 다시 실행: ./fix_printer.sh setup 192.168.0.xxx"
-    exit 1
+  # 예전 IP(192.168.0.201)로 등록된 항목은 IP가 바뀌어 더 이상 쓸 수 없으므로 지웁니다.
+  LANG=C LC_ALL=C lpstat -v 2>/dev/null | sed -nE 's/^device for ([^:]+): (.*)$/\1 \2/p' |
+    while read -r name dev; do
+      case "$dev" in
+        *"$DEFAULT_IP"*)
+          say "예전 IP 항목 제거: $name"
+          cancel -a "$name" 2>/dev/null
+          sudo lpadmin -x "$name"
+          ;;
+      esac
+    done
+
+  if [ -z "$q" ]; then
+    say "등록된 프린터가 없어 새로 등록합니다."
+    uri="${1:+ipp://$1/ipp/print}"
+    [ -z "$uri" ] && uri="$(find_airprint_uri)"
+    if [ -z "$uri" ] || ! ipp_ok "$uri"; then
+      say "프린터를 찾지 못했습니다. 프린터 전원과 Wi-Fi 연결을 확인해 주세요."
+      exit 1
+    fi
+    if ! sudo lpadmin -p "$QUEUE" -D "$DESC" -E -v "$uri" -m everywhere; then
+      say "자동 등록에 실패했습니다. 시스템 설정 > 프린터 및 스캐너 > 프린터 추가에서"
+      say "프린터를 선택하고 '사용'을 'AirPrint'로 고른 뒤 추가하고, 이 명령을 다시 실행해 주세요."
+      exit 1
+    fi
+    q="$QUEUE"
   fi
+
+  say "대상 프린터: $q"
+  drv="$(queue_driver "$q")"
+  [ -n "$drv" ] && say "사용 중인 드라이버: $drv"
+  case "$drv" in
+    *[Ss]amsung*)
+      say ""
+      say "주의: 아직 삼성 드라이버를 쓰고 있습니다. 시스템 설정 > 프린터 및 스캐너에서"
+      say "이 프린터를 제거한 뒤 다시 추가할 때 '사용'을 'AirPrint'로 골라 주세요."
+      say "그다음 이 명령을 한 번 더 실행하면 나머지 설정이 적용됩니다."
+      ;;
+  esac
 
   say ""
-  say "기존에 같은 프린터로 등록된 항목을 정리합니다."
-  host="$(printf '%s' "$uri" | sed -E 's#^[a-z]+://([^/:]+).*#\1#')"
-  lpstat -v 2>/dev/null | while IFS= read -r line; do
-    name="$(printf '%s' "$line" | sed -E 's/^device for ([^:]+):.*/\1/')"
-    dev="${line#*: }"
-    case "$dev" in
-      *"$host"*|*"$DEFAULT_IP"*|*[Ss]amsung*|*C51*)
-        say "  제거: $name ($dev)"
-        cancel -a "$name" 2>/dev/null
-        lpadmin -x "$name"
-        ;;
-    esac
-  done
+  say "오류가 나도 멈추지 않고 다시 시도하도록 설정합니다. (관리자 암호를 물어보면 입력해 주세요)"
+  sudo lpadmin -p "$q" -o printer-error-policy=retry-job -o printer-is-shared=false || exit 1
+  sudo cupsenable "$q"
+  sudo cupsaccept "$q"
+  lpoptions -d "$q" >/dev/null
 
   say ""
-  say "AirPrint 방식으로 다시 등록합니다. (관리자 암호를 물어보면 입력해 주세요)"
-  if ! sudo lpadmin -p "$QUEUE" -D "$DESC" -E -v "$uri" -m everywhere \
-        -o printer-error-policy=retry-job \
-        -o printer-is-shared=false; then
-    say ""
-    say "자동 등록에 실패했습니다. 시스템 설정 > 프린터 및 스캐너 > 프린터 추가에서"
-    say "프린터를 선택하고 '사용'을 'AirPrint'로 고른 뒤 추가해 주세요."
-    exit 1
-  fi
-  sudo cupsenable "$QUEUE"
-  sudo cupsaccept "$QUEUE"
-  lpoptions -d "$QUEUE" >/dev/null
-
-  say ""
-  say "완료되었습니다. 기본 프린터: $DESC"
-  say "시험 인쇄를 하려면: ./fix_printer.sh test"
+  say "완료되었습니다. 기본 프린터: $q"
 }
 
 cmd_test() {
-  printf '프린터 시험 인쇄\n%s\n' "$(date)" | lp -d "$QUEUE" -t "Test" && say "시험 인쇄를 보냈습니다."
+  q="$(find_queue)"
+  [ -z "$q" ] && { say "등록된 프린터가 없습니다. 먼저 setup을 실행해 주세요."; exit 1; }
+  printf 'Printer test page\n%s\n' "$(date)" | lp -d "$q" -t "Test" && say "시험 인쇄를 보냈습니다: $q"
 }
 
 # 오류로 멈춘(disabled) 프린터를 다시 켭니다. 인쇄 작업은 지우지 않습니다.
