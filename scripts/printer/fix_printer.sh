@@ -32,7 +32,19 @@ require_mac() {
 # .local 주소를 쓰면 공유기가 프린터 IP를 바꿔도 계속 연결됩니다.
 find_airprint_uri() {
   command -v ippfind >/dev/null 2>&1 || return 1
-  ippfind _ipp._tcp --name "$NAME_PATTERN" -T 5 2>/dev/null | head -n 1
+  # 프린터가 없으면 ippfind가 끝나지 않으므로 6초 뒤 강제로 멈춥니다.
+  out="$(mktemp)"
+  ippfind _ipp._tcp --name "$NAME_PATTERN" -T 5 >"$out" 2>/dev/null &
+  pid=$!
+  for _ in 1 2 3 4 5 6; do
+    [ -s "$out" ] && break
+    kill -0 "$pid" 2>/dev/null || break
+    sleep 1
+  done
+  kill "$pid" 2>/dev/null
+  wait "$pid" 2>/dev/null
+  head -n 1 "$out"
+  rm -f "$out"
 }
 
 ipp_ok() {
@@ -56,11 +68,9 @@ cmd_check() {
   else
     say "AirPrint 검색 결과 없음"
   fi
-  if ping -c 2 -t 3 "$DEFAULT_IP" >/dev/null 2>&1; then
-    say "$DEFAULT_IP 응답 있음"
-  else
-    say "$DEFAULT_IP 응답 없음 (IP가 바뀌었거나 프린터가 꺼져 있을 수 있습니다)"
-  fi
+  say ""
+  say "== 기본 프린터 =="
+  lpstat -d 2>/dev/null
 }
 
 # macOS는 lpstat 결과를 시스템 언어로 번역하므로, 번역되지 않는 값만 사용합니다.
@@ -92,17 +102,6 @@ queue_driver() {
 
 cmd_setup() {
   q="$(find_queue)"
-
-  # 예전 IP(192.168.0.201)로 등록된 항목은 IP가 바뀌어 더 이상 쓸 수 없으므로 지웁니다.
-  list_queues | while read -r name dev; do
-      case "$dev" in
-        *"$DEFAULT_IP"*)
-          say "예전 IP 항목 제거: $name"
-          cancel -a "$name" 2>/dev/null
-          sudo lpadmin -x "$name"
-          ;;
-      esac
-    done
 
   if [ -z "$q" ]; then
     say "등록된 프린터가 없어 새로 등록합니다."
