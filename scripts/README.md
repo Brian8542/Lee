@@ -26,3 +26,18 @@ python link_hub_wiki.py "보관함경로" --apply   # 2단계: 실제 적용
 - 결과
   - `07_QONE_Wiki/점검_허브위키_애매한짝_<시각>.md`에 애매한 짝을 남깁니다.
   - `log.md`(`07_QONE_Wiki/log.md`, 없으면 보관함 맨 위 `log.md`)에 링크 수를 기록합니다.
+
+## consolidate_cheonggiwa.py — 제주청기와장어 자료 취합·정리
+
+바탕화면·문서·다운로드에서 이름에 `청기와`가 들어간 파일/폴더를 바탕화면의
+`[ultimate] 제주청기와장어` 폴더로 모으고, 중복 파일(내용 동일)·빈 폴더·의미 없는 파일을 정리합니다.
+Windows/macOS 모두 Python 3만 있으면 동작합니다.
+
+```bash
+python consolidate_cheonggiwa.py            # 미리보기 (변경 없음)
+python consolidate_cheonggiwa.py --apply    # 실행
+```
+
+- 삭제 대상은 바탕화면 `_청기와정리_삭제대기_<날짜>` 폴더로 옮겨지며, 확인 후 직접 비우면 됩니다 (`--permanent`로 즉시 삭제).
+- `--keyword 장어` 로 키워드 추가, `--root "D:/자료"` 로 검색 위치 지정, `--sweep-empty` 로 관련 없는 빈 폴더까지 삭제.
+- 작업 내역은 대상 폴더 안 `_정리기록_<날짜>.csv` 에 남습니다.
