@@ -41,3 +41,7 @@ python consolidate_cheonggiwa.py --apply    # 실행
 - 삭제 대상은 바탕화면 `_청기와정리_삭제대기_<날짜>` 폴더로 옮겨지며, 확인 후 직접 비우면 됩니다 (`--permanent`로 즉시 삭제).
 - `--keyword 장어` 로 키워드 추가, `--root "D:/자료"` 로 검색 위치 지정, `--sweep-empty` 로 관련 없는 빈 폴더까지 삭제.
 - 작업 내역은 대상 폴더 안 `_정리기록_<날짜>.csv` 에 남습니다.
+- **Mac 이미지**: `python3 consolidate_cheonggiwa.py --apply --images --photos`
+  - `--images`: 사진·iCloud Drive 폴더까지 검색하고, Spotlight로 이미지 속 글자(라이브 텍스트)·태그·코멘트에 키워드가 있는 이미지도 `이미지/` 폴더로 모읍니다.
+  - `--photos`: 사진 앱에서 키워드로 검색되는 사진을 원본으로 `이미지/사진앱_내보내기`에 복사합니다 (사진 앱에서는 아무것도 지우지 않음). 처음 실행 시 터미널의 '사진' 자동화 권한 허용이 필요합니다.
+  - 사진 라이브러리(`.photoslibrary`)·앱 번들 내부 파일은 절대 옮기지 않습니다.

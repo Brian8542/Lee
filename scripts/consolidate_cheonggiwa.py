@@ -21,6 +21,7 @@
   python consolidate_cheonggiwa.py --apply --keyword 청기와 --keyword 장어
   python consolidate_cheonggiwa.py --root "D:/자료" --apply
   python consolidate_cheonggiwa.py --apply --sweep-empty   # 관련 없는 빈 폴더까지 삭제
+  python3 consolidate_cheonggiwa.py --apply --images --photos   # Mac: 관련 이미지 전부
 """
 from __future__ import annotations
 
@@ -29,12 +30,18 @@ import csv
 import hashlib
 import os
 import shutil
+import subprocess
 import sys
 import unicodedata
 from datetime import datetime
 from pathlib import Path
 
 TARGET_NAME = "[ultimate] 제주청기와장어"
+IMAGE_EXT = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".gif", ".webp", ".tif", ".tiff",
+             ".bmp", ".raw", ".dng", ".cr2", ".cr3", ".nef", ".arw", ".psd", ".ai", ".svg"}
+# 앱 번들·사진 라이브러리 안의 파일을 빼내면 라이브러리가 망가지므로 절대 들어가지 않음
+PACKAGE_EXT = (".photoslibrary", ".app", ".bundle", ".pkg", ".imovielibrary", ".fcpbundle",
+               ".photolibrary", ".aplibrary", ".musiclibrary")
 JUNK_NAMES = {".ds_store", "thumbs.db", "desktop.ini", "ehthumbs.db", ".localized"}
 STAMP = datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -109,6 +116,7 @@ class Organizer:
                 dirnames[:] = [
                     n for n in dirnames
                     if not n.startswith(".") and n not in {"AppData", "Library", "node_modules"}
+                    and not n.lower().endswith(PACKAGE_EXT)
                     and (d / n).resolve() not in skip
                 ]
                 for n in list(dirnames):
@@ -132,6 +140,71 @@ class Organizer:
                 if self.apply:
                     d.rmdir()
                 d = d.parent
+
+    # ---------- Mac 이미지: Spotlight ----------
+    def collect_spotlight_images(self, keywords: list[str], home: Path):
+        """파일 이름뿐 아니라 이미지 속 글자(라이브 텍스트), 태그, 코멘트, 키워드에
+        키워드가 들어간 이미지를 Spotlight(mdfind)로 찾아 대상/이미지 로 이동."""
+        if not shutil.which("mdfind"):
+            print("  (mdfind 없음: macOS가 아니라서 건너뜀)")
+            return
+        attrs = ["kMDItemDisplayName", "kMDItemTextContent", "kMDItemKeywords",
+                 "kMDItemUserTags", "kMDItemFinderComment", "kMDItemTitle", "kMDItemDescription"]
+        cond = " || ".join(f'{a} == "*{k}*"cd' for k in keywords for a in attrs)
+        query = f'kMDItemContentTypeTree == "public.image" && ({cond})'
+        try:
+            out = subprocess.run(["mdfind", "-onlyin", str(home), query],
+                                 capture_output=True, text=True, timeout=600).stdout
+        except Exception as e:  # noqa: BLE001
+            print(f"  Spotlight 검색 실패: {e}")
+            return
+        skip = [self.target.resolve(), self.trash.resolve()] + [p.resolve() for p in self.planned]
+        for line in out.splitlines():
+            p = Path(line)
+            if not p.is_file() or p.suffix.lower() not in IMAGE_EXT:
+                continue
+            parts = [x.lower() for x in p.parts]
+            if any(x.endswith(PACKAGE_EXT) for x in parts) or "library" in parts[:4] and \
+                    "mobile documents" not in parts:
+                continue  # 사진 앱 라이브러리·앱 내부 파일은 건드리지 않음 (사진 앱은 --photos 로)
+            rp = p.resolve()
+            if any(rp == s or s in rp.parents for s in skip):
+                continue
+            self.planned.append(p)
+            self.move(p, self.target / "이미지" / p.name)
+
+    # ---------- Mac 이미지: 사진 앱 ----------
+    def export_photos_app(self, keywords: list[str]):
+        """사진(Photos) 앱에서 키워드로 검색되는 사진을 원본으로 내보내기(복사).
+        사진 앱 라이브러리에서는 아무것도 지우지 않음."""
+        if not shutil.which("osascript"):
+            print("  (osascript 없음: macOS가 아니라서 건너뜀)")
+            return
+        dest = self.target / "이미지" / "사진앱_내보내기"
+        for k in keywords:
+            k_as = k.replace('"', '\\"')
+            dest_as = str(dest).replace('"', '\\"')
+            export = (f'export found to (POSIX file "{dest_as}" as alias) with using originals'
+                      if self.apply else "")
+            script = f'''
+with timeout of 7200 seconds
+  tell application "Photos"
+    set found to search for "{k_as}"
+    if (count of found) > 0 then
+      {export}
+    end if
+    return count of found
+  end tell
+end timeout'''
+            if self.apply:
+                dest.mkdir(parents=True, exist_ok=True)
+            r = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
+            if r.returncode != 0:
+                print(f"  사진 앱 검색 실패({k}): {r.stderr.strip()}\n"
+                      "  → 시스템 설정 > 개인정보 보호 및 보안 > 자동화 에서 터미널의 '사진' 접근을 허용하세요.")
+                continue
+            n = r.stdout.strip() or "0"
+            self.record(f"사진앱 내보내기({k}, {n}장)", Path("Photos"), dest)
 
     # ---------- 2단계: 중복 파일 ----------
     def dedupe(self):
@@ -255,6 +328,10 @@ def main():
     ap.add_argument("--desktop", type=Path, help="바탕화면 경로 직접 지정")
     ap.add_argument("--sweep-empty", action="store_true",
                     help="검색 위치 안의 관련 없는 빈 폴더까지 모두 삭제")
+    ap.add_argument("--images", action="store_true",
+                    help="[Mac] 사진·iCloud Drive 폴더 추가 검색 + Spotlight로 이미지 속 글자/태그까지 검색해 취합")
+    ap.add_argument("--photos", action="store_true",
+                    help="[Mac] 사진 앱에서 키워드로 검색되는 사진을 원본으로 내보내기(복사)")
     a = ap.parse_args()
 
     desktop = a.desktop or find_desktop()
@@ -263,6 +340,9 @@ def main():
     home = Path.home()
     roots = a.root or [desktop, home / "Documents", home / "문서", home / "Downloads", home / "다운로드"]
     keywords = a.keyword or ["청기와"]
+    if a.images:
+        roots += [home / "Pictures", home / "사진",
+                  home / "Library" / "Mobile Documents" / "com~apple~CloudDocs"]  # iCloud Drive
 
     print(f"대상 폴더 : {target}\n검색 위치 : {', '.join(map(str, roots))}\n키워드    : {keywords}")
     print("모드      : " + ("실행" if a.apply else "미리보기 (실제 변경 없음, --apply 로 실행)") + "\n")
@@ -273,6 +353,12 @@ def main():
 
     org = Organizer(target, trash, a.apply, a.permanent)
     print("── 1단계: 관련 파일·폴더 취합"); org.collect(roots, keywords, a.sweep_empty)
+    if a.images:
+        print("\n── 1-2단계: Spotlight 이미지 검색 (이미지 속 글자·태그·코멘트 포함)")
+        org.collect_spotlight_images(keywords, home)
+    if a.photos:
+        print("\n── 1-3단계: 사진 앱에서 내보내기")
+        org.export_photos_app(keywords)
     if target.exists():
         print("\n── 2단계: 중복 파일 제거"); org.dedupe()
         print("\n── 3단계: 의미 없는 파일·빈 폴더 정리"); org.cleanup()
