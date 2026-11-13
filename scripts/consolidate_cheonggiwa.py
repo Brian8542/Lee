@@ -83,6 +83,12 @@ class Organizer:
         print(f"[{action}] {src}" + (f"  ->  {dst}" if dst else ""))
 
     def move(self, src: Path, dst: Path, action="이동"):
+        # 폴더를 자기 자신 안으로 옮기지 않음 (macOS 한글 NFD/NFC 차이로 shutil이
+        # 복사 후 원본을 통째로 지우는 사고 방지)
+        if nfc(os.path.realpath(dst)).startswith(nfc(os.path.realpath(src)) + os.sep) or \
+                nfc(os.path.realpath(src)) == nfc(os.path.realpath(dst)):
+            print(f"[건너뜀: 자기 자신 안으로 이동] {src}")
+            return src
         dst = unique_path(dst)
         self.record(action, src, dst)
         if self.apply:
@@ -106,7 +112,7 @@ class Organizer:
     # ---------- 1단계: 취합 ----------
     def collect(self, roots: list[Path], keywords: list[str], sweep: bool):
         kws = [nfc(k).lower() for k in keywords]
-        skip = {self.target.resolve(), self.trash.resolve()}
+        skip = {nfc(self.target.resolve()), nfc(self.trash.resolve())}
         for root in roots:
             if not root.is_dir():
                 continue
@@ -118,7 +124,7 @@ class Organizer:
                     if not n.startswith(".") and n not in {"AppData", "Library", "node_modules"}
                     and not n.lower().endswith(PACKAGE_EXT)
                     and not is_protected(d / n)
-                    and (d / n).resolve() not in skip
+                    and nfc((d / n).resolve()) not in skip
                 ]
                 for n in list(dirnames):
                     if any(k in nfc(n).lower() for k in kws):
