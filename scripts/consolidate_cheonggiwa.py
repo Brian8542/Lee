@@ -117,6 +117,7 @@ class Organizer:
                     n for n in dirnames
                     if not n.startswith(".") and n not in {"AppData", "Library", "node_modules"}
                     and not n.lower().endswith(PACKAGE_EXT)
+                    and not is_protected(d / n)
                     and (d / n).resolve() not in skip
                 ]
                 for n in list(dirnames):
@@ -168,6 +169,8 @@ class Organizer:
                     "mobile documents" not in parts:
                 continue  # 사진 앱 라이브러리·앱 내부 파일은 건드리지 않음 (사진 앱은 --photos 로)
             rp = p.resolve()
+            if inside_protected(p, home):
+                continue
             if any(rp == s or s in rp.parents for s in skip):
                 continue
             self.planned.append(p)
@@ -293,6 +296,24 @@ end timeout'''
             w.writerow(["작업", "원래 위치", "새 위치"])
             w.writerows(self.log)
         return out
+
+
+def is_protected(d: Path) -> bool:
+    """다른 프로그램이 관리하는 폴더는 건드리지 않음: Obsidian 볼트, git 저장소,
+    다른 [ultimate] 정리 폴더."""
+    n = nfc(d.name)
+    if n.startswith("[ultimate]") and n != TARGET_NAME:
+        return True
+    return (d / ".obsidian").is_dir() or (d / ".git").exists()
+
+
+def inside_protected(p: Path, stop: Path) -> bool:
+    for parent in p.parents:
+        if parent == stop or parent == parent.parent:
+            break
+        if is_protected(parent):
+            return True
+    return False
 
 
 def sha256(p: Path) -> str:
